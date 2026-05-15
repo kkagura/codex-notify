@@ -68,6 +68,10 @@ func run() int {
 		Logger()
 
 	logEvent.Info().Msg("event parsed")
+	logEvent.Debug().
+		Strs("payload_keys", event.Keys(env.Raw)).
+		Int("payload_bytes", len(raw)).
+		Msg("event payload shape")
 
 	key := dedupe.Key(env)
 	store := dedupe.NewStore(app.Paths.StateFile)
@@ -84,6 +88,11 @@ func run() int {
 	if silent {
 		notification.Silent = true
 	}
+	logEvent.Debug().
+		Str("notification_title", notification.Title).
+		Str("notification_message", notification.Message).
+		Bool("notification_silent", notification.Silent).
+		Msg("notification rendered")
 
 	notifier := windows.NewNotifier()
 	if err := notifier.Send(context.Background(), notification); err != nil {

@@ -21,13 +21,15 @@ func Build(env event.Envelope) notify.Notification {
 	switch env.Type {
 	case "agent-turn-complete":
 		return renderAgentTurnComplete(env)
+	case "PermissionRequest":
+		return renderPermissionRequest(env)
 	default:
 		return renderDefault(env)
 	}
 }
 
 func renderAgentTurnComplete(env event.Envelope) notify.Notification {
-	inputs := event.GetStringSlice(env.Raw, "input-messages")
+	inputs := event.GetStringSlice(env.Raw, "input-messages", "input_messages", "inputMessages")
 	project := projectName(env.Cwd)
 
 	parts := make([]string, 0, 2)
@@ -35,7 +37,7 @@ func renderAgentTurnComplete(env event.Envelope) notify.Notification {
 		parts = append(parts, cleanText(inputs[0], 90))
 	}
 
-	assistant := event.GetString(env.Raw, "last-assistant-message")
+	assistant := event.GetString(env.Raw, "last-assistant-message", "last_assistant_message", "lastAssistantMessage")
 	if assistant != "" {
 		parts = append(parts, cleanText(assistant, defaultMaxBodyRunes))
 	}
@@ -44,6 +46,48 @@ func renderAgentTurnComplete(env event.Envelope) notify.Notification {
 	}
 
 	title := "Codex 已完成一轮处理"
+	if project != "" {
+		title = fmt.Sprintf("%s [%s]", title, project)
+	}
+
+	return notify.Notification{
+		AppID:   defaultAppID,
+		Title:   title,
+		Message: strings.Join(parts, "\n"),
+		Group:   fallback(env.ThreadID, "default"),
+		Tag:     fallback(env.TurnID, hashTag(env.RawJSON)),
+	}
+}
+
+func renderPermissionRequest(env event.Envelope) notify.Notification {
+	project := projectName(env.Cwd)
+	toolName := event.GetString(env.Raw, "tool_name", "toolName")
+	permissionMode := event.GetString(env.Raw, "permission_mode", "permissionMode")
+	model := event.GetString(env.Raw, "model")
+	description := getNestedString(env.Raw, "tool_input", "description")
+	command := getNestedString(env.Raw, "tool_input", "command")
+
+	parts := make([]string, 0, 4)
+	if toolName != "" {
+		parts = append(parts, "Tool: "+toolName)
+	}
+	if command != "" {
+		parts = append(parts, "Command: "+cleanText(command, defaultMaxBodyRunes))
+	}
+	if description != "" {
+		parts = append(parts, "Reason: "+cleanText(description, 160))
+	}
+	if permissionMode != "" {
+		parts = append(parts, "Mode: "+permissionMode)
+	}
+	if model != "" {
+		parts = append(parts, "Model: "+model)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "Codex is requesting permission.")
+	}
+
+	title := "Codex Permission Request"
 	if project != "" {
 		title = fmt.Sprintf("%s [%s]", title, project)
 	}
@@ -80,7 +124,7 @@ func renderDefault(env event.Envelope) notify.Notification {
 }
 
 func summarizeRaw(raw map[string]any) string {
-	keys := []string{"type", "client", "cwd", "thread-id", "turn-id"}
+	keys := []string{"type", "event_type", "eventType", "hook_event_name", "hookEventName", "client", "cwd", "thread-id", "thread_id", "threadId", "session_id", "sessionId", "turn-id", "turn_id", "turnId"}
 	parts := make([]string, 0, len(keys))
 	for _, key := range keys {
 		if value := event.GetString(raw, key); value != "" {
@@ -119,6 +163,18 @@ func cleanText(input string, maxRunes int) string {
 		return text
 	}
 	return string(runes[:maxRunes]) + "..."
+}
+
+func getNestedString(raw map[string]any, objectKey string, valueKeys ...string) string {
+	value, ok := raw[objectKey]
+	if !ok {
+		return ""
+	}
+	nested, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return event.GetString(nested, valueKeys...)
 }
 
 func projectName(cwd string) string {
